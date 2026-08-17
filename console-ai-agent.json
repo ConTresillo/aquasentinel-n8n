@@ -1,0 +1,636 @@
+{
+  "name": "AquaSentinel — AI Agent Console",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-48adf7e71f4e",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === EDIT HERE: what to emit this run ===\n// Options: leave `query` empty and pick scenarios, or ask a user query.\nconst query = ''; // e.g. 'Why is node N02 red?'\n\nconst eventsToEmit = [\n  { scenario: 'salt', node_id: 'N02', severity: 'HIGH' },\n  // { scenario: 'silt', node_id: 'N02', severity: 'MEDIUM' },\n  // { scenario: 'sensor-spike', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'sensor-offline', node_id: 'N04', severity: 'CRITICAL' },\n  // { scenario: 'wastewater', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'prediction', node_id: 'N02', severity: 'MEDIUM' },\n];\n\n// --- scenario fixtures (do not edit below) ---\nconst SCENARIOS = {\n  salt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TDS_RATE_RULE',\n    payload: { parameter: 'tds', baseline: 320, current: 900 },\n  },\n  silt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TURBIDITY_RATE_RULE',\n    payload: { parameter: 'turbidity', baseline: 1.2, current: 8.9 },\n  },\n  'sensor-spike': {\n    event_type: 'ANOMALY_DETECTED', source: 'SENSOR_SPIKE',\n    payload: { parameter: 'ph', baseline: 7.1, current: 12.4, note: 'impossible value' },\n  },\n  'sensor-offline': {\n    event_type: 'NODE_OFFLINE', source: 'HEARTBEAT',\n    payload: { parameter: 'heartbeat', last_seen_minutes_ago: 18 },\n  },\n  wastewater: {\n    event_type: 'ANOMALY_DETECTED', source: 'MULTI_PARAM_RULE',\n    payload: { parameter: 'multiple', ph: 6.2, tds: 1400, turbidity: 22.5, temperature: 24.1 },\n  },\n  prediction: {\n    event_type: 'PREDICTED_ANOMALY', source: 'TDS_FORECAST_MODEL',\n    payload: { parameter: 'tds', current: 500, predicted_value: 850, prediction_horizon_minutes: 10 },\n  },\n};\n\nconst items = [];\nfor (const e of eventsToEmit) {\n  const base = SCENARIOS[e.scenario];\n  if (!base) continue;\n  const event = {\n    event_id: 'EVT-' + e.scenario.toUpperCase().replace('-', '') + '-' + String(Date.now()).slice(-4),\n    event_type: base.event_type,\n    source: base.source,\n    timestamp: new Date().toISOString(),\n    severity: e.severity || 'MEDIUM',\n    node_id: e.node_id || 'N01',\n    payload: base.payload,\n  };\n  items.push({ json: { is_query: false, event, query: '' } });\n}\nif (query) {\n  items.push({ json: { is_query: true, event: null, query } });\n}\nif (items.length === 0) {\n  items.push({ json: { is_query: false, event: null, query: '' } });\n}\nreturn items;\n"
+      },
+      "id": "ei-bdf0c0f0a4a1",
+      "name": "Event Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1020,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const PRIORITY = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };\nconst items = $input.all().map(i => i.json);\n\nconst work = items.filter(it => it.event || it.query);\nif (work.length === 0) {\n  return [{ json: { noWork: true, message: 'Queue empty — no agent invoked.' } }];\n}\n\nconst entries = work.map((it, i) => ({ it, i, p: it.event ? PRIORITY[it.event.severity] || 0 : 0, isQ: !!it.query }));\nentries.sort((a, b) => {\n  if (a.isQ !== b.isQ) return a.isQ ? 1 : -1;\n  if (b.p !== a.p) return b.p - a.p;\n  return a.i - b.i;\n});\nreturn entries.map(e => ({ json: e.it }));\n"
+      },
+      "id": "sort-251ecb1cd11d",
+      "name": "Sort & Filter (Queue)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={{ $json.noWork === undefined }}",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "hw-0c9e73a8240b",
+      "name": "Has Work?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={{ $json.is_query === true }}",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "iq-9266c7bb2242",
+      "name": "Is Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/events",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "ce-346244abb597",
+      "name": "Create Event (backend)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -300,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst isQuery = !!item.query;\nlet event = item.event || {};\nif (!isQuery && !event.event_id) {\n  event = {\n    event_id: item.event_id,\n    event_type: item.event_type,\n    source: item.source,\n    timestamp: item.timestamp,\n    severity: item.severity,\n    node_id: item.node_id,\n    payload: item.payload,\n    status: item.status,\n  };\n}\nconst prompt = isQuery\n  ? `AQUASENTINEL USER QUERY\\n\\nQuestion: ${item.query}\\n\\nUse the available tools to gather evidence from the mock backend, reason over it, and answer the question. End with a clear recommendation if relevant.`\n  : `AQUASENTINEL ANOMALY EVENT TO INVESTIGATE\\n\\nEvent: ${JSON.stringify(event, null, 2)}\\n\\nInvestigate this event using the available tools (current readings, historical readings, anomaly event, sensor status). Reason over the evidence: observation, inference, uncertainty. End your final answer with a \"Recommendation:\" section.`;\nreturn [{\n  json: {\n    prompt,\n    event,\n    event_id: event.event_id || '',\n    isQuery,\n  },\n}];\n"
+      },
+      "id": "prep-1eb1579bd3f8",
+      "name": "Prepare Agent Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": false,
+        "needsFallback": false,
+        "options": {
+          "systemMessage": "You are the AquaSentinel water-quality agent. You investigate anomalies and answer questions about sensor data using four tools:\n\n- get_current_readings(node_id): current sensor values for a node\n- get_historical_readings(node_id): recent history for a node\n- get_anomaly_event(event_id): details of a specific anomaly event\n- get_sensor_status(node_id): sensor health/status for a node\n\nYou are event-triggered: only use the tools you actually need. Do not fabricate data — if a tool returns no data, say so. Always reason explicitly: Observation -> Inference -> Uncertainty. End your final answer with a \"Recommendation:\" section.",
+          "maxIterations": 8,
+          "returnIntermediateSteps": false,
+          "passthroughBinaryImages": true
+        }
+      },
+      "id": "agent-11f8a033bcdd",
+      "name": "AquaSentinel Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "mode": "id",
+          "value": "sarvam-105b"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "baseURL": "https://api.sarvam.ai/v1",
+          "temperature": 0.2,
+          "maxTokens": 1000
+        }
+      },
+      "id": "model-cce41025d05d",
+      "name": "Sarvam Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "credentials": {
+        "openAiApi": {
+          "id": "fkS0KHX1F8YeLIhJ",
+          "name": "Sarvam AI"
+        }
+      },
+      "position": [
+        200,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the current sensor readings (tds, turbidity, ph, temperature) for a given node_id. Call this to see live values.",
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/readings/current?node_id={node_id}",
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "authentication": "none",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "node_id",
+              "description": "The AquaSentinel sensor node id, e.g. N02",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tr-d4bac0816ecd",
+      "name": "get_current_readings",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        420,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the recent historical sensor readings for a given node_id. Call this to see trends over time.",
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/readings/history?node_id={node_id}",
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "authentication": "none",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "node_id",
+              "description": "The AquaSentinel sensor node id, e.g. N02",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "th-b5ad37287ba7",
+      "name": "get_historical_readings",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        420,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the full details of an anomaly event by its event_id (e.g. EVT-SALT-1234).",
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/events/{event_id}",
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "authentication": "none",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "event_id",
+              "description": "The AquaSentinel event id, e.g. EVT-SALT-1234",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "te-32bac6b35638",
+      "name": "get_anomaly_event",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        420,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get the sensor health/status for a given node_id (online, drift, stuck, battery).",
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/sensors/status?node_id={node_id}",
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "authentication": "none",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "node_id",
+              "description": "The AquaSentinel sensor node id, e.g. N02",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ts-6ad578bbd60b",
+      "name": "get_sensor_status",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        420,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst prepared = $('Prepare Agent Prompt').first().json;\nreturn [{\n  json: {\n    event_id: prepared.event_id || '',\n    isQuery: !!prepared.isQuery,\n    agent_output: item.output || item.json?.output || '',\n  },\n}];\n"
+      },
+      "id": "par-db31ae1cec48",
+      "name": "Parse Agent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={{ $json.isQuery === true }}",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "iq2-480d3d970ffa",
+      "name": "Is User Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://host.docker.internal:8000/api/events/' + $json.event_id }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id || '', status: 'INVESTIGATED', investigation_result: $json.agent_output || '', confidence: null, recommendation: '' }) }}",
+        "options": {}
+      },
+      "id": "upd-318024651733",
+      "name": "Update Event (PATCH)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { processed: true, answer: $json.agent_output || '' } }];"
+      },
+      "id": "resp-89f58db553fe",
+      "name": "Query Answered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { done: true, message: 'Queue empty — no agent invoked.' } }];"
+      },
+      "id": "end-b1935cdaecde",
+      "name": "Queue Empty",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -660,
+        -200
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Event Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Input": {
+      "main": [
+        [
+          {
+            "node": "Sort & Filter (Queue)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort & Filter (Queue)": {
+      "main": [
+        [
+          {
+            "node": "Has Work?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Work?": {
+      "main": [
+        [
+          {
+            "node": "Is Query?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Query?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agent Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Event (backend)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Event (backend)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agent Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Agent Prompt": {
+      "main": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AquaSentinel Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sarvam Chat Model",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_tool": [
+        [
+          {
+            "node": "get_current_readings",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "get_historical_readings",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "get_anomaly_event",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "get_sensor_status",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sarvam Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_current_readings": {
+      "ai_tool": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_historical_readings": {
+      "ai_tool": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_anomaly_event": {
+      "ai_tool": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_sensor_status": {
+      "ai_tool": [
+        [
+          {
+            "node": "AquaSentinel Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Agent Result": {
+      "main": [
+        [
+          {
+            "node": "Is User Query?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is User Query?": {
+      "main": [
+        [
+          {
+            "node": "Query Answered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Event (PATCH)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Event (PATCH)": {
+      "main": [
+        [
+          {
+            "node": "Query Answered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

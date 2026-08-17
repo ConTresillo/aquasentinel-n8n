@@ -1,0 +1,129 @@
+{
+  "name": "AquaSentinel — User Query",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aquasentinel/query",
+        "responseMode": "responseNode"
+      },
+      "id": "11f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b11",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-360, 0],
+      "webhookId": "aquasentinel-query"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate USER_QUERY payload.\nconst output = [];\nfor (const item of $input.all()) {\n  const body = item.json.body ?? item.json;\n  if (body.event_type !== 'USER_QUERY') {\n    throw new Error('This workflow only accepts USER_QUERY events.');\n  }\n  if (!body.event_id || !body.timestamp || !body.payload || !body.payload.text) {\n    throw new Error('Malformed USER_QUERY. Required: event_id, timestamp, payload.text.');\n  }\n  output.push({ json: { ...body } });\n}\nreturn output;"
+      },
+      "id": "12f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b12",
+      "name": "Validate USER_QUERY",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "q1",
+              "name": "event_id",
+              "type": "string",
+              "value": "={{ $json.event_id }}"
+            },
+            {
+              "id": "q2",
+              "name": "event_type",
+              "type": "string",
+              "value": "={{ $json.event_type }}"
+            },
+            {
+              "id": "q3",
+              "name": "source",
+              "type": "string",
+              "value": "={{ $json.source }}"
+            },
+            {
+              "id": "q4",
+              "name": "user_id",
+              "type": "string",
+              "value": "={{ $json.user_id || 'demo-user' }}"
+            },
+            {
+              "id": "q5",
+              "name": "timestamp",
+              "type": "string",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "id": "q6",
+              "name": "question",
+              "type": "string",
+              "value": "={{ $json.payload.text }}"
+            },
+            {
+              "id": "q7",
+              "name": "instruction",
+              "type": "string",
+              "value": "Answer this user question using your available tools. This is a user-driven investigation."
+            }
+          ]
+        }
+      },
+      "id": "13f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b13",
+      "name": "Prepare Agent Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-40, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AGENT_API_URL || 'http://host.docker.internal:8000/agent/investigate' }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"event\": {\n    \"event_id\": \"{{ $json.event_id }}\",\n    \"event_type\": \"{{ $json.event_type }}\",\n    \"source\": \"{{ $json.source }}\",\n    \"user_id\": \"{{ $json.user_id }}\",\n    \"timestamp\": \"{{ $json.timestamp }}\",\n    \"payload\": {\n      \"text\": \"{{ $json.question }}\"\n    }\n  },\n  \"instruction\": \"{{ $json.instruction }}\"\n}",
+        "options": {}
+      },
+      "id": "14f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b14",
+      "name": "Call Real Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [120, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"event_id\": \"{{ $json.event_id }}\",\n  \"answer\": \"{{ $json.output || $json.investigation_result || $json.response || '' }}\"\n}",
+        "options": {}
+      },
+      "id": "15f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b15",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 2,
+      "position": [280, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Validate USER_QUERY", "type": "main", "index": 0 }]]
+    },
+    "Validate USER_QUERY": {
+      "main": [[{ "node": "Prepare Agent Request", "type": "main", "index": 0 }]]
+    },
+    "Prepare Agent Request": {
+      "main": [[{ "node": "Call Real Agent", "type": "main", "index": 0 }]]
+    },
+    "Call Real Agent": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

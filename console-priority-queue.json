@@ -1,0 +1,395 @@
+{
+  "name": "AquaSentinel — Console & Priority Queue",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-7520f1518e93",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === EDIT HERE: what to emit this run ===\n// Options: leave `query` empty and pick scenarios, or ask a user query.\nconst query = ''; // e.g. 'Why is node N02 red?'\n\nconst eventsToEmit = [\n  { scenario: 'salt', node_id: 'N02', severity: 'HIGH' },\n  // { scenario: 'silt', node_id: 'N02', severity: 'MEDIUM' },\n  // { scenario: 'sensor-spike', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'sensor-offline', node_id: 'N04', severity: 'CRITICAL' },\n  // { scenario: 'wastewater', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'prediction', node_id: 'N02', severity: 'MEDIUM' },\n];\n\n// --- scenario fixtures (do not edit below) ---\nconst SCENARIOS = {\n  salt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TDS_RATE_RULE',\n    payload: { parameter: 'tds', baseline: 320, current: 900 },\n  },\n  silt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TURBIDITY_RATE_RULE',\n    payload: { parameter: 'turbidity', baseline: 1.2, current: 8.9 },\n  },\n  'sensor-spike': {\n    event_type: 'ANOMALY_DETECTED', source: 'SENSOR_SPIKE',\n    payload: { parameter: 'ph', baseline: 7.1, current: 12.4, note: 'impossible value' },\n  },\n  'sensor-offline': {\n    event_type: 'NODE_OFFLINE', source: 'HEARTBEAT',\n    payload: { parameter: 'heartbeat', last_seen_minutes_ago: 18 },\n  },\n  wastewater: {\n    event_type: 'ANOMALY_DETECTED', source: 'MULTI_PARAM_RULE',\n    payload: { parameter: 'multiple', ph: 6.2, tds: 1400, turbidity: 22.5, temperature: 24.1 },\n  },\n  prediction: {\n    event_type: 'PREDICTED_ANOMALY', source: 'TDS_FORECAST_MODEL',\n    payload: { parameter: 'tds', current: 500, predicted_value: 850, prediction_horizon_minutes: 10 },\n  },\n};\n\nconst items = [];\nfor (const e of eventsToEmit) {\n  const base = SCENARIOS[e.scenario];\n  if (!base) continue;\n  const event = {\n    event_id: 'EVT-' + e.scenario.toUpperCase().replace('-', '') + '-' + String(Date.now()).slice(-4),\n    event_type: base.event_type,\n    source: base.source,\n    timestamp: new Date().toISOString(),\n    severity: e.severity || 'MEDIUM',\n    node_id: e.node_id || 'N01',\n    payload: base.payload,\n  };\n  items.push({ json: { is_query: false, event, query: '' } });\n}\nif (query) {\n  items.push({ json: { is_query: true, event: null, query } });\n}\nif (items.length === 0) {\n  items.push({ json: { is_query: false, event: null, query: '' } });\n}\nreturn items;\n"
+      },
+      "id": "ei-079e11459e8b",
+      "name": "Event Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -820,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const PRIORITY = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };\nconst items = $input.all().map(i => i.json);\n\n// filter out the empty placeholder\nconst work = items.filter(it => it.event || it.query);\nif (work.length === 0) {\n  return [{ json: { noWork: true, message: 'Queue empty — no agent invoked.' } }];\n}\n\n// sort: events by severity desc, then FIFO; user queries go last\nconst entries = work.map((it, i) => ({ it, i, p: it.event ? PRIORITY[it.event.severity] || 0 : 0, isQ: !!it.query }));\nentries.sort((a, b) => {\n  if (a.isQ !== b.isQ) return a.isQ ? 1 : -1;\n  if (b.p !== a.p) return b.p - a.p;\n  return a.i - b.i;\n});\nreturn entries.map(e => ({ json: e.it }));\n"
+      },
+      "id": "sort-75c4adf8aef0",
+      "name": "Sort & Filter (Queue)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={ $json.noWork === undefined }",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "hw-08b80d645884",
+      "name": "Has Work?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={ $json.is_query === true }",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "iq-a110370a1136",
+      "name": "Is Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/events",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.event) }}",
+        "options": {}
+      },
+      "id": "ce-4141736cbfbc",
+      "name": "Create Event (backend)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -100,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst event = item.event || {};\nreturn [{\n  json: {\n    agentBody: {\n      event,\n      instruction: item.query\n        ? 'Answer this user question using your available tools. This is a user-driven investigation.'\n        : 'Investigate this AquaSentinel event using your available tools. Reason over the data context.',\n      question: item.query || '',\n    },\n    event,\n    query: item.query || '',\n    isQuery: !!item.query,\n  },\n}];\n"
+      },
+      "id": "prep-e79980116e71",
+      "name": "Prepare Agent Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/agent/investigate",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.agentBody) }}",
+        "options": {}
+      },
+      "id": "ca-41ec239eb087",
+      "name": "Call Real Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst src = item.json && typeof item.json === 'object' ? item.json\n  : (item.body && typeof item.body === 'object' ? item.body : item);\nreturn [{\n  json: {\n    event_id: src.event_id || item.event_id || '',\n    event_type: (item.event && item.event.event_type) || src.event_type || '',\n    status: src.status || 'INVESTIGATED',\n    investigation_result: src.investigation_result || src.output || src.answer || src.response || '',\n    confidence: src.confidence ?? null,\n    recommendation: src.recommendation || '',\n    query: item.query || '',\n    isQuery: !!item.query,\n  },\n}];\n"
+      },
+      "id": "par-c7d4c1002cf2",
+      "name": "Parse Agent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "leftValue": "={ $json.isQuery === true }",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "iq2-7d052cc740d5",
+      "name": "Is User Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://host.docker.internal:8000/api/events/' + $json.event_id }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id || '', status: $json.status || 'INVESTIGATED', investigation_result: $json.investigation_result || '', confidence: $json.confidence ?? null, recommendation: $json.recommendation || '' }) }}",
+        "options": {}
+      },
+      "id": "upd-a4a9b32fa78e",
+      "name": "Update Event (PATCH)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        620,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { processed: true, query: $json.query || '' } }];"
+      },
+      "id": "resp-3c6dbc44b32f",
+      "name": "Query Answered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { done: true, message: 'Queue empty — no agent invoked.' } }];"
+      },
+      "id": "end-5f3676332495",
+      "name": "Queue Empty",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -160
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Event Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Input": {
+      "main": [
+        [
+          {
+            "node": "Sort & Filter (Queue)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sort & Filter (Queue)": {
+      "main": [
+        [
+          {
+            "node": "Has Work?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Work?": {
+      "main": [
+        [
+          {
+            "node": "Is Query?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Query?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agent Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Event (backend)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Event (backend)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Agent Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Agent Request": {
+      "main": [
+        [
+          {
+            "node": "Call Real Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Real Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Agent Result": {
+      "main": [
+        [
+          {
+            "node": "Is User Query?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is User Query?": {
+      "main": [
+        [
+          {
+            "node": "Query Answered",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Event (PATCH)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Event (PATCH)": {
+      "main": [
+        [
+          {
+            "node": "Query Answered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

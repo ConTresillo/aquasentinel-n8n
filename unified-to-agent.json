@@ -1,0 +1,286 @@
+{
+  "name": "AquaSentinel — Unified Event & Query",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aquasentinel/any",
+        "responseMode": "responseNode"
+      },
+      "id": "21f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b21",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-900, 220],
+      "webhookId": "aquasentinel-any"
+    },
+    {
+      "parameters": {},
+      "id": "31f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b31",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-900, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// EDIT THIS PAYLOAD to test any scenario from inside n8n.\n// Click the node, change values, then run the workflow manually.\nconst event = {\n  event_id: \"EVT-SALT-001\",\n  event_type: \"ANOMALY_DETECTED\",\n  source: \"TDS_RATE_RULE\",\n  timestamp: \"2026-08-17T12:00:00Z\",\n  severity: \"HIGH\",\n  node_id: \"N02\",\n  payload: { parameter: \"tds\", baseline: 320, current: 900, change_percent: 181.25 }\n};\nreturn [{ json: event }];"
+      },
+      "id": "32f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b32",
+      "name": "Event Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-700, -120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate both sensor events and user queries.\nconst supported = ['ANOMALY_DETECTED', 'SENSOR_FAULT', 'NODE_OFFLINE', 'PREDICTED_ANOMALY', 'USER_QUERY'];\nconst output = [];\nfor (const item of $input.all()) {\n  const body = item.json.body ?? item.json;\n  if (!supported.includes(body.event_type)) {\n    throw new Error(`Unsupported event_type: ${body.event_type}`);\n  }\n  if (body.event_type === 'USER_QUERY') {\n    if (!body.event_id || !body.timestamp || !body.payload || !body.payload.text) {\n      throw new Error('Malformed USER_QUERY. Required: event_id, timestamp, payload.text.');\n    }\n  } else {\n    const required = ['event_id', 'event_type', 'timestamp', 'severity', 'payload'];\n    const missing = required.filter(f => body[f] === undefined || body[f] === null || body[f] === '');\n    if (missing.length > 0) {\n      throw new Error(`Malformed event. Missing fields: ${missing.join(', ')}`);\n    }\n  }\n  output.push({ json: { ...body } });\n}\nreturn output;"
+      },
+      "id": "22f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b22",
+      "name": "Validate Event / Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "ANOMALY_DETECTED"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "ANOMALY_DETECTED"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "SENSOR_FAULT"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "SENSOR_FAULT"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "NODE_OFFLINE"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "NODE_OFFLINE"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "PREDICTED_ANOMALY"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "PREDICTED_ANOMALY"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": { "type": "string", "operation": "equals" },
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "USER_QUERY"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "USER_QUERY"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "Unsupported" }
+      },
+      "id": "23f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b23",
+      "name": "Route Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [-340, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "u1", "name": "event_id", "type": "string", "value": "={{ $json.event_id }}" },
+            { "id": "u2", "name": "event_type", "type": "string", "value": "={{ $json.event_type }}" },
+            { "id": "u3", "name": "source", "type": "string", "value": "={{ $json.source }}" },
+            { "id": "u4", "name": "timestamp", "type": "string", "value": "={{ $json.timestamp }}" },
+            { "id": "u5", "name": "severity", "type": "string", "value": "={{ $json.severity || '' }}" },
+            { "id": "u6", "name": "node_id", "type": "string", "value": "={{ $json.node_id || '' }}" },
+            { "id": "u7", "name": "payload", "type": "object", "value": "={{ $json.payload }}" },
+            {
+              "id": "u8",
+              "name": "question",
+              "type": "string",
+              "value": "={{ $json.payload && $json.payload.text ? $json.payload.text : '' }}"
+            },
+            {
+              "id": "u9",
+              "name": "instruction",
+              "type": "string",
+              "value": "={{ $json.event_type === 'USER_QUERY' ? 'Answer this user question using your available tools. This is a user-driven investigation.' : 'Investigate this AquaSentinel event using your available tools. Do not monitor continuously.' }}"
+            }
+          ]
+        }
+      },
+      "id": "24f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b24",
+      "name": "Prepare Agent Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-180, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/agent/investigate",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event: { event_id: $json.event_id || '', event_type: $json.event_type || '', source: $json.source || '', timestamp: $json.timestamp || '', severity: $json.severity || '', node_id: $json.node_id || '', payload: $json.payload || {} }, instruction: $json.instruction || '', question: $json.question || '' }) }}",
+        "options": {}
+      },
+      "id": "25f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b25",
+      "name": "Call Real Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-20, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst data = (item.json && typeof item.json === 'object') ? item.json : (item.body && typeof item.body === 'object' ? item.body : item);\nreturn [{\n  json: {\n    event_id: data.event_id || item.event_id || '',\n    event_type: data.event_type || item.event_type || '',\n    status: data.status || 'INVESTIGATED',\n    investigation_result: data.investigation_result || data.output || data.answer || data.response || '',\n    confidence: data.confidence ?? null,\n    recommendation: data.recommendation || ''\n  }\n}];"
+      },
+      "id": "26f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b26",
+      "name": "Parse Agent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": { "type": "string", "operation": "equals" },
+              "leftValue": "={{ $json.event_type }}",
+              "rightValue": "USER_QUERY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "27f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b27",
+      "name": "Is User Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [300, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://host.docker.internal:8000/api/events/' + $json.event_id }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id || '', status: $json.status || 'INVESTIGATED', investigation_result: $json.investigation_result || '', confidence: $json.confidence ?? null, recommendation: $json.recommendation || '' }) }}",
+        "options": {}
+      },
+      "id": "29f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b29",
+      "name": "Update Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [460, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ event_id: $json.event_id, status: $json.status, investigation_result: $json.investigation_result }) }}",
+        "options": {}
+      },
+      "id": "30f4d8f0-5c5d-4c0e-8f3f-3a2f9a1d1b30",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 2,
+      "position": [620, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Validate Event / Query", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "Event Input", "type": "main", "index": 0 }]]
+    },
+    "Event Input": {
+      "main": [[{ "node": "Validate Event / Query", "type": "main", "index": 0 }]]
+    },
+    "Validate Event / Query": {
+      "main": [[{ "node": "Route Event Type", "type": "main", "index": 0 }]]
+    },
+    "Route Event Type": {
+      "main": [
+        [{ "node": "Prepare Agent Request", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Agent Request", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Agent Request", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Agent Request", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Agent Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Agent Request": {
+      "main": [[{ "node": "Call Real Agent", "type": "main", "index": 0 }]]
+    },
+    "Call Real Agent": {
+      "main": [[{ "node": "Parse Agent Result", "type": "main", "index": 0 }]]
+    },
+    "Parse Agent Result": {
+      "main": [[{ "node": "Is User Query?", "type": "main", "index": 0 }]]
+    },
+    "Is User Query?": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }],
+        [{ "node": "Update Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Event": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
