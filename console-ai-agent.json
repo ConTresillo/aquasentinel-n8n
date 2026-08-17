@@ -2,11 +2,100 @@
   "name": "AquaSentinel — AI Agent Console",
   "nodes": [
     {
-      "parameters": {},
-      "id": "manual-48adf7e71f4e",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
+      "parameters": {
+        "httpMethod": "POST",
+        "formTitle": "AquaSentinel — Run a scenario",
+        "formDescription": "Pick a scenario to simulate, or ask the agent a question.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Event / Scenario",
+              "fieldType": "radio",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "salt",
+                    "value": "salt"
+                  },
+                  {
+                    "option": "silt",
+                    "value": "silt"
+                  },
+                  {
+                    "option": "sensor-spike",
+                    "value": "sensor-spike"
+                  },
+                  {
+                    "option": "sensor-offline",
+                    "value": "sensor-offline"
+                  },
+                  {
+                    "option": "wastewater",
+                    "value": "wastewater"
+                  },
+                  {
+                    "option": "prediction",
+                    "value": "prediction"
+                  },
+                  {
+                    "option": "user_inp",
+                    "value": "user_inp"
+                  }
+                ]
+              },
+              "fieldName": "scenario",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Node",
+              "fieldType": "text",
+              "placeholder": "N02",
+              "fieldName": "node_id",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "Severity",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "HIGH",
+                    "value": "HIGH"
+                  },
+                  {
+                    "option": "MEDIUM",
+                    "value": "MEDIUM"
+                  },
+                  {
+                    "option": "CRITICAL",
+                    "value": "CRITICAL"
+                  },
+                  {
+                    "option": "LOW",
+                    "value": "LOW"
+                  }
+                ]
+              },
+              "fieldName": "severity",
+              "requiredField": false
+            },
+            {
+              "fieldLabel": "User query (leave empty to run a scenario)",
+              "fieldType": "textarea",
+              "placeholder": "e.g. Why is node N02 showing high TDS?",
+              "fieldName": "query",
+              "requiredField": false
+            }
+          ]
+        },
+        "options": {
+          "customCss": "/* Hide the user-query textarea unless the user_inp event is selected */\n.form-group:has(textarea) { display: none; }\n.inputs-wrapper:has(input[value=\"user_inp\"]:checked) .form-group:has(textarea) { display: block; }"
+        }
+      },
+      "id": "manual-dbd6828233a4",
+      "name": "Run Scenario (Form)",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.4,
       "position": [
         -1200,
         0
@@ -14,9 +103,9 @@
     },
     {
       "parameters": {
-        "jsCode": "// === EDIT HERE: what to emit this run ===\n// Options: leave `query` empty and pick scenarios, or ask a user query.\nconst query = ''; // e.g. 'Why is node N02 red?'\n\nconst eventsToEmit = [\n  { scenario: 'salt', node_id: 'N02', severity: 'HIGH' },\n  // { scenario: 'silt', node_id: 'N02', severity: 'MEDIUM' },\n  // { scenario: 'sensor-spike', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'sensor-offline', node_id: 'N04', severity: 'CRITICAL' },\n  // { scenario: 'wastewater', node_id: 'N03', severity: 'HIGH' },\n  // { scenario: 'prediction', node_id: 'N02', severity: 'MEDIUM' },\n];\n\n// --- scenario fixtures (do not edit below) ---\nconst SCENARIOS = {\n  salt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TDS_RATE_RULE',\n    payload: { parameter: 'tds', baseline: 320, current: 900 },\n  },\n  silt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TURBIDITY_RATE_RULE',\n    payload: { parameter: 'turbidity', baseline: 1.2, current: 8.9 },\n  },\n  'sensor-spike': {\n    event_type: 'ANOMALY_DETECTED', source: 'SENSOR_SPIKE',\n    payload: { parameter: 'ph', baseline: 7.1, current: 12.4, note: 'impossible value' },\n  },\n  'sensor-offline': {\n    event_type: 'NODE_OFFLINE', source: 'HEARTBEAT',\n    payload: { parameter: 'heartbeat', last_seen_minutes_ago: 18 },\n  },\n  wastewater: {\n    event_type: 'ANOMALY_DETECTED', source: 'MULTI_PARAM_RULE',\n    payload: { parameter: 'multiple', ph: 6.2, tds: 1400, turbidity: 22.5, temperature: 24.1 },\n  },\n  prediction: {\n    event_type: 'PREDICTED_ANOMALY', source: 'TDS_FORECAST_MODEL',\n    payload: { parameter: 'tds', current: 500, predicted_value: 850, prediction_horizon_minutes: 10 },\n  },\n};\n\nconst items = [];\nfor (const e of eventsToEmit) {\n  const base = SCENARIOS[e.scenario];\n  if (!base) continue;\n  const event = {\n    event_id: 'EVT-' + e.scenario.toUpperCase().replace('-', '') + '-' + String(Date.now()).slice(-4),\n    event_type: base.event_type,\n    source: base.source,\n    timestamp: new Date().toISOString(),\n    severity: e.severity || 'MEDIUM',\n    node_id: e.node_id || 'N01',\n    payload: base.payload,\n  };\n  items.push({ json: { is_query: false, event, query: '' } });\n}\nif (query) {\n  items.push({ json: { is_query: true, event: null, query } });\n}\nif (items.length === 0) {\n  items.push({ json: { is_query: false, event: null, query: '' } });\n}\nreturn items;\n"
+        "jsCode": "// Reads the Form Trigger submission and turns it into event/query items.\nconst f = $input.first().json; // { scenario, node_id, severity, query }\n\n// --- scenario fixtures (do not edit below) ---\nconst SCENARIOS = {\n  salt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TDS_RATE_RULE',\n    payload: { parameter: 'tds', baseline: 320, current: 900 },\n  },\n  silt: {\n    event_type: 'ANOMALY_DETECTED', source: 'TURBIDITY_RATE_RULE',\n    payload: { parameter: 'turbidity', baseline: 1.2, current: 8.9 },\n  },\n  'sensor-spike': {\n    event_type: 'ANOMALY_DETECTED', source: 'SENSOR_SPIKE',\n    payload: { parameter: 'ph', baseline: 7.1, current: 12.4, note: 'impossible value' },\n  },\n  'sensor-offline': {\n    event_type: 'NODE_OFFLINE', source: 'HEARTBEAT',\n    payload: { parameter: 'heartbeat', last_seen_minutes_ago: 18 },\n  },\n  wastewater: {\n    event_type: 'ANOMALY_DETECTED', source: 'MULTI_PARAM_RULE',\n    payload: { parameter: 'multiple', ph: 6.2, tds: 1400, turbidity: 22.5, temperature: 24.1 },\n  },\n  prediction: {\n    event_type: 'PREDICTED_ANOMALY', source: 'TDS_FORECAST_MODEL',\n    payload: { parameter: 'tds', current: 500, predicted_value: 850, prediction_horizon_minutes: 10 },\n  },\n};\n\nconst items = [];\nconst scenario = f.scenario || 'salt';\nif (scenario === 'user_inp') {\n  items.push({ json: { is_query: true, event: null, query: f.query || '' } });\n  return items;\n}\nif (f.query) {\n  items.push({ json: { is_query: true, event: null, query: f.query } });\n  return items;\n}\nconst base = SCENARIOS[scenario];\nif (!base) {\n  return [{ json: { is_query: false, event: null, query: '' } }];\n}\nconst event = {\n  event_id: 'EVT-' + scenario.toUpperCase().replace('-', '') + '-' + String(Date.now()).slice(-4),\n  event_type: base.event_type,\n  source: base.source,\n  timestamp: new Date().toISOString(),\n  severity: f.severity || 'MEDIUM',\n  node_id: f.node_id || 'N01',\n  payload: base.payload,\n};\nitems.push({ json: { is_query: false, event, query: '' } });\nreturn items;\n"
       },
-      "id": "ei-bdf0c0f0a4a1",
+      "id": "ei-68bc5af14e20",
       "name": "Event Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -29,7 +118,7 @@
       "parameters": {
         "jsCode": "const PRIORITY = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };\nconst items = $input.all().map(i => i.json);\n\nconst work = items.filter(it => it.event || it.query);\nif (work.length === 0) {\n  return [{ json: { noWork: true, message: 'Queue empty — no agent invoked.' } }];\n}\n\nconst entries = work.map((it, i) => ({ it, i, p: it.event ? PRIORITY[it.event.severity] || 0 : 0, isQ: !!it.query }));\nentries.sort((a, b) => {\n  if (a.isQ !== b.isQ) return a.isQ ? 1 : -1;\n  if (b.p !== a.p) return b.p - a.p;\n  return a.i - b.i;\n});\nreturn entries.map(e => ({ json: e.it }));\n"
       },
-      "id": "sort-251ecb1cd11d",
+      "id": "sort-dd844f8b0173",
       "name": "Sort & Filter (Queue)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -61,7 +150,7 @@
         },
         "options": {}
       },
-      "id": "hw-0c9e73a8240b",
+      "id": "hw-de0e37bb2695",
       "name": "Has Work?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -93,7 +182,7 @@
         },
         "options": {}
       },
-      "id": "iq-9266c7bb2242",
+      "id": "iq-93da25649fe3",
       "name": "Is Query?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -112,7 +201,7 @@
         "jsonBody": "={{ JSON.stringify($json.event) }}",
         "options": {}
       },
-      "id": "ce-346244abb597",
+      "id": "ce-879f832bdb9e",
       "name": "Create Event (backend)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
@@ -125,7 +214,7 @@
       "parameters": {
         "jsCode": "const item = $input.first().json;\nconst isQuery = !!item.query;\nlet event = item.event || {};\nif (!isQuery && !event.event_id) {\n  event = {\n    event_id: item.event_id,\n    event_type: item.event_type,\n    source: item.source,\n    timestamp: item.timestamp,\n    severity: item.severity,\n    node_id: item.node_id,\n    payload: item.payload,\n    status: item.status,\n  };\n}\nconst prompt = isQuery\n  ? `AQUASENTINEL USER QUERY\\n\\nQuestion: ${item.query}\\n\\nUse the available tools to gather evidence from the mock backend, reason over it, and answer the question. End with a clear recommendation if relevant.`\n  : `AQUASENTINEL ANOMALY EVENT TO INVESTIGATE\\n\\nEvent: ${JSON.stringify(event, null, 2)}\\n\\nInvestigate this event using the available tools (current readings, historical readings, anomaly event, sensor status). Reason over the evidence: observation, inference, uncertainty. End your final answer with a \"Recommendation:\" section.`;\nreturn [{\n  json: {\n    prompt,\n    event,\n    event_id: event.event_id || '',\n    isQuery,\n  },\n}];\n"
       },
-      "id": "prep-1eb1579bd3f8",
+      "id": "prep-e4626a02c2b1",
       "name": "Prepare Agent Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -147,10 +236,10 @@
           "passthroughBinaryImages": true
         }
       },
-      "id": "agent-11f8a033bcdd",
+      "id": "agent-dff3b5c775d3",
       "name": "AquaSentinel Agent",
       "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 2,
+      "typeVersion": 2.1,
       "position": [
         80,
         0
@@ -169,7 +258,7 @@
           "maxTokens": 1000
         }
       },
-      "id": "model-cce41025d05d",
+      "id": "model-fbb09325e61a",
       "name": "Sarvam Chat Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
@@ -204,7 +293,7 @@
         },
         "options": {}
       },
-      "id": "tr-d4bac0816ecd",
+      "id": "tr-40f6a3bd1334",
       "name": "get_current_readings",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
@@ -233,7 +322,7 @@
         },
         "options": {}
       },
-      "id": "th-b5ad37287ba7",
+      "id": "th-56692b051f29",
       "name": "get_historical_readings",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
@@ -262,7 +351,7 @@
         },
         "options": {}
       },
-      "id": "te-32bac6b35638",
+      "id": "te-9cace3e2318e",
       "name": "get_anomaly_event",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
@@ -291,7 +380,7 @@
         },
         "options": {}
       },
-      "id": "ts-6ad578bbd60b",
+      "id": "ts-e939f406b0a9",
       "name": "get_sensor_status",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
@@ -304,7 +393,7 @@
       "parameters": {
         "jsCode": "const item = $input.first().json;\nconst prepared = $('Prepare Agent Prompt').first().json;\nreturn [{\n  json: {\n    event_id: prepared.event_id || '',\n    isQuery: !!prepared.isQuery,\n    agent_output: item.output || item.json?.output || '',\n  },\n}];\n"
       },
-      "id": "par-db31ae1cec48",
+      "id": "par-449eb68d9ff5",
       "name": "Parse Agent Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -336,7 +425,7 @@
         },
         "options": {}
       },
-      "id": "iq2-480d3d970ffa",
+      "id": "iq2-80d656540cd9",
       "name": "Is User Query?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -355,7 +444,7 @@
         "jsonBody": "={{ JSON.stringify({ event_id: $json.event_id || '', status: 'INVESTIGATED', investigation_result: $json.agent_output || '', confidence: null, recommendation: '' }) }}",
         "options": {}
       },
-      "id": "upd-318024651733",
+      "id": "upd-5fa3b872b3c3",
       "name": "Update Event (PATCH)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
@@ -368,7 +457,7 @@
       "parameters": {
         "jsCode": "return [{ json: { processed: true, answer: $json.agent_output || '' } }];"
       },
-      "id": "resp-89f58db553fe",
+      "id": "resp-8c359d27dfb3",
       "name": "Query Answered",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -381,7 +470,7 @@
       "parameters": {
         "jsCode": "return [{ json: { done: true, message: 'Queue empty — no agent invoked.' } }];"
       },
-      "id": "end-b1935cdaecde",
+      "id": "end-a875afbfec80",
       "name": "Queue Empty",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -392,7 +481,7 @@
     }
   ],
   "connections": {
-    "Manual Trigger": {
+    "Run Scenario (Form)": {
       "main": [
         [
           {
